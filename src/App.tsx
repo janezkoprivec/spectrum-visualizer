@@ -72,12 +72,14 @@ function App() {
 
   const handleFilePlay = () => {
     const audioManager = audioManagerRef.current
+    const renderer = rendererRef.current
     if (!audioManager) {
       setStatus('Audio manager not ready.')
       return
     }
     try {
       audioManager.playLoadedFile()
+      renderer?.setPaused(false)
       setMode('file')
       const name = audioManager.getCurrentFileName() ?? 'audio file'
       setIsFilePlaying(true)
@@ -93,11 +95,13 @@ function App() {
 
   const handleFilePause = () => {
     const audioManager = audioManagerRef.current
+    const renderer = rendererRef.current
     if (!audioManager) {
       setStatus('Audio manager not ready.')
       return
     }
     audioManager.pauseFile()
+    renderer?.setPaused(true)
     if (hasFile) {
       const name = audioManager.getCurrentFileName() ?? 'audio file'
       setStatus(`File paused: ${name}`)

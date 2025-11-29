@@ -40,6 +40,7 @@ export class SpectrogramRenderer {
   private readonly axisWidth = 56
 
   private animationFrameId: number | null = null
+  private isPaused = false
 
   constructor(
     canvas: HTMLCanvasElement,
@@ -67,6 +68,16 @@ export class SpectrogramRenderer {
 
     // Initial clear
     this.clear()
+  }
+
+  /**
+   * Pause or resume the scrolling of the spectrogram.
+   * When paused, we keep drawing the frequency axis, but
+   * we stop scrolling and stop sampling new FFT frames so
+   * the image is effectively "frozen" for inspection.
+   */
+  setPaused(paused: boolean): void {
+    this.isPaused = paused
   }
 
   start(): void {
@@ -98,8 +109,19 @@ export class SpectrogramRenderer {
 
     if (specWidth <= 1 || height <= 0) return
 
+    if (this.isPaused) {
+      // Do not scroll or sample new FFT data; just redraw the axis overlay.
+      this.drawFrequencyAxis()
+      return
+    }
+
     // Fetch latest FFT magnitudes (in decibels).
-    this.analyser.getFloatFrequencyData(this.freqData)
+    // TypeScript's DOM lib sometimes uses a slightly different generic type
+    // parameter here (ArrayBuffer vs ArrayBufferLike), so we cast to keep
+    // the signature simple.
+    this.analyser.getFloatFrequencyData(
+      this.freqData as unknown as Float32Array<ArrayBuffer>,
+    )
 
     // Scroll existing spectrogram 1px to the left inside the spectrogram area.
     this.ctx.drawImage(
@@ -149,7 +171,6 @@ export class SpectrogramRenderer {
    * This is intentionally straightforward so it can be easily replaced
    * with a more advanced palette later.
    */
-  // eslint-disable-next-line class-methods-use-this
   private colourMap(value: number): [number, number, number] {
     const v = Math.min(Math.max(value, 0), 1)
 
@@ -230,7 +251,6 @@ export class SpectrogramRenderer {
     this.ctx.restore()
   }
 
-  // eslint-disable-next-line class-methods-use-this
   private formatFrequency(freq: number): string {
     if (freq >= 1000) {
       const value = freq / 1000
