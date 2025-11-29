@@ -1,0 +1,1 @@
+This is a project for Digital Sound Production course at Facutly of Computer Science and Informatics in Ljubljana. 
