@@ -1,4 +1,6 @@
 import { frequencyToBinIndex } from './audio'
+import type { AnalyzerFrame } from './AudioAnalyzer'
+import type { AudioAnalyzer } from './AudioAnalyzer'
 
 export interface SpectrogramOptions {
   /**
@@ -28,9 +30,10 @@ export interface SpectrogramOptions {
 export class SpectrogramRenderer {
   private readonly canvas: HTMLCanvasElement
   private readonly ctx: CanvasRenderingContext2D
+  private readonly audioAnalyzer: AudioAnalyzer
   private readonly analyser: AnalyserNode
 
-  private readonly freqData: Float32Array
+  private readonly onFrame?: (frame: AnalyzerFrame) => void
 
   private readonly minDecibels: number
   private readonly maxDecibels: number
@@ -44,8 +47,15 @@ export class SpectrogramRenderer {
 
   constructor(
     canvas: HTMLCanvasElement,
-    analyser: AnalyserNode,
+    audioAnalyzer: AudioAnalyzer,
     options?: SpectrogramOptions,
+    /**
+     * Optional callback invoked once per animation frame with the
+     * full AnalyzerFrame (FFT + band energies). This allows the
+     * React UI to render additional debug views (e.g. band graph)
+     * without the spectrogram needing to know about them.
+     */
+    onFrame?: (frame: AnalyzerFrame) => void,
   ) {
     const ctx = canvas.getContext('2d')
     if (!ctx) {
@@ -54,9 +64,9 @@ export class SpectrogramRenderer {
 
     this.canvas = canvas
     this.ctx = ctx
-    this.analyser = analyser
-
-    this.freqData = new Float32Array(this.analyser.frequencyBinCount)
+    this.audioAnalyzer = audioAnalyzer
+    this.analyser = audioAnalyzer.getAnalyser()
+    this.onFrame = onFrame
 
     this.minDecibels =
       options?.minDecibels ?? this.analyser.minDecibels ?? -100
@@ -115,13 +125,14 @@ export class SpectrogramRenderer {
       return
     }
 
-    // Fetch latest FFT magnitudes (in decibels).
-    // TypeScript's DOM lib sometimes uses a slightly different generic type
-    // parameter here (ArrayBuffer vs ArrayBufferLike), so we cast to keep
-    // the signature simple.
-    this.analyser.getFloatFrequencyData(
-      this.freqData as unknown as Float32Array<ArrayBuffer>,
-    )
+    // Pull the latest analysis frame from the shared AudioAnalyzer.
+    // The same frame is used both for the debug spectrogram and any
+    // additional visualizations (e.g. band bar graph).
+    const frame = this.audioAnalyzer.getFrame()
+    const freqData = frame.fftMagnitudes
+
+    // Make the frame available to React via the optional callback.
+    this.onFrame?.(frame)
 
     // Scroll existing spectrogram 1px to the left inside the spectrogram area.
     this.ctx.drawImage(
@@ -141,10 +152,9 @@ export class SpectrogramRenderer {
     for (let y = 0; y < height; y++) {
       // Linear mapping: y=0 is top (highest freq), y=height-1 is bottom (0 Hz).
       const norm = 1 - y / (height - 1)
-      const binIndex =
-        Math.round(norm * (this.freqData.length - 1)) || 0
+      const binIndex = Math.round(norm * (freqData.length - 1)) || 0
 
-      const magDb = this.freqData[binIndex]
+      const magDb = freqData[binIndex]
       const value = this.normalizeDecibels(magDb) // [0, 1]
       const [r, g, b] = this.colourMap(value)
 

@@ -85,6 +85,82 @@ button:disabled {
   background: #000;
 }
 
+.bands-section {
+  border-radius: 0.4rem;
+  border: 1px solid #e1e1e1;
+  padding: 0.5rem 0.75rem 0.75rem;
+  background: #fafafa;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.bands-header {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+}
+
+.bands-title {
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+
+.bands-caption {
+  font-size: 0.8rem;
+  color: #666;
+}
+
+.bands-graph {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.bands-graph-column {
+  flex-direction: column;
+}
+
+.band-row {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.band-series {
+  flex: 1;
+  height: 40px;
+}
+
+.band-series-bg {
+  fill: #111;
+}
+
+.band-series-line {
+  stroke: #22c55e;
+  stroke-width: 1.5;
+}
+
+.band-label {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.1rem;
+  font-size: 0.75rem;
+}
+
+.band-label-row {
+  min-width: 110px;
+}
+
+.band-label-name {
+  font-weight: 600;
+}
+
+.band-label-range {
+  color: #777;
+}
+
 .status-section {
   border-radius: 0.4rem;
   border: 1px solid #e1e1e1;
