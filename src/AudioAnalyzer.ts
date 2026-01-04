@@ -184,6 +184,27 @@ export class AudioAnalyzer {
   }
 
   /**
+   * Load an audio file from a URL (e.g., a bundled asset) without starting playback.
+   */
+  async setSourceFromUrl(url: string, displayName?: string): Promise<void> {
+    await this.ensureRunning()
+    await this.stop()
+
+    const response = await fetch(url)
+    if (!response.ok) {
+      throw new Error(`Failed to fetch audio: ${response.status} ${response.statusText}`)
+    }
+    const arrayBuffer = await response.arrayBuffer()
+    const audioBuffer = await this.audioContext.decodeAudioData(arrayBuffer)
+
+    this.fileBuffer = audioBuffer
+    this.filePauseOffset = 0
+    this.fileStartTime = 0
+    this.fileName = displayName ?? url.split('/').pop() ?? 'preset track'
+    this.currentMode = 'file'
+  }
+
+  /**
    * Convenience: load and immediately start playing the file from the beginning.
    */
   async playFile(file: File): Promise<void> {
