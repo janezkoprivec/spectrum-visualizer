@@ -4,10 +4,6 @@ export interface PresetTrack {
   url: string
 }
 
-/**
- * Pull all audio files placed under src/assets/tracks (mp3/ogg/wav/flac).
- * Users can drop files there; Vite will serve them as static URLs.
- */
 const presetTrackImports = import.meta.glob('./assets/tracks/*.{mp3,ogg,wav,flac}', {
   as: 'url',
   eager: true,

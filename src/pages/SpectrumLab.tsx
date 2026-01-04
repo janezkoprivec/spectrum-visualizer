@@ -105,8 +105,6 @@ function SpectrumLab() {
         frequencyTicks: [100, 500, 1000, 2000, 5000, 10000],
       },
       (frame) => {
-        // The same analysis frame that powers the spectrogram also feeds
-        // the per-band time-series graphs below.
         setBandHistories((prev) => {
           const maxLength = 200
           const next: number[][] = frame.bands.map((value, bandIndex) => {
@@ -124,11 +122,8 @@ function SpectrumLab() {
 
     rendererRef.current = renderer
 
-    // Initialize band config, histories, and status once on mount.
     renderer.start()
 
-    // Defer React state initialization to the microtask queue so
-    // it does not run synchronously within the effect body.
     queueMicrotask(() => {
       setStatus('Ready. Load an audio file or start the microphone.')
       setBandsConfig(config)

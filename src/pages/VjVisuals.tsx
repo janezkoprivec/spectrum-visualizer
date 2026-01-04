@@ -4,10 +4,10 @@ import type { AudioMode } from '../audio'
 import { AudioAnalyzer } from '../AudioAnalyzer'
 import type { PresetTrack } from '../tracks'
 import { getPresetTracks } from '../tracks'
-import type { BandMeta, MoodState, Palette } from '../mood'
-import { paletteFromMood, updateMoodFromBands } from '../mood'
+import type { Palette, PaletteName } from '../mood'
+import { getPalette, getAllPaletteNames, getPaletteInfo } from '../mood'
 
-type VisualMode = 'bars' | 'rings' | 'particles' | 'hybrid'
+type VisualMode = 'hybrid' | 'star' | 'orbit'
 
 interface Particle {
   x: number
@@ -20,10 +20,9 @@ interface Particle {
 }
 
 const VISUALS: Record<VisualMode, string> = {
-  bars: 'Neon bars',
-  rings: 'Pulse rings',
-  particles: 'Glow particles',
   hybrid: 'Pulse + sparks',
+  star: 'Frequency star',
+  orbit: 'Frequency orbit',
 }
 
 function withAlpha(color: string, alpha: number): string {
@@ -52,16 +51,6 @@ function createParticles(
   return particles
 }
 
-function respawnParticle(p: Particle, width: number, height: number, bandCount = 6): void {
-  p.x = Math.random() * width
-  p.y = Math.random() * height
-  p.vx = (Math.random() - 0.5) * 0.9
-  p.vy = (Math.random() - 0.5) * 0.9
-  p.life = Math.random() * 0.8 + 0.2
-  p.hue = 180 + Math.random() * 140
-  p.band = Math.floor(Math.random() * Math.max(1, bandCount))
-}
-
 function respawnParticleRadial(p: Particle, cx: number, cy: number, bandCount = 6): void {
   const angle = Math.random() * Math.PI * 2
   const speed = 0.35 + Math.random() * 0.6
@@ -72,121 +61,6 @@ function respawnParticleRadial(p: Particle, cx: number, cy: number, bandCount = 
   p.life = 0.8 + Math.random() * 0.8
   p.hue = 190 + Math.random() * 120
   p.band = Math.floor(Math.random() * Math.max(1, bandCount))
-}
-
-function drawBars(
-  ctx: CanvasRenderingContext2D,
-  width: number,
-  height: number,
-  bands: number[],
-  palette: Palette,
-): void {
-  const gradient = ctx.createLinearGradient(0, height, 0, 0)
-  gradient.addColorStop(0, palette.background)
-  gradient.addColorStop(1, palette.base)
-  ctx.fillStyle = gradient
-  ctx.fillRect(0, 0, width, height)
-
-  const barCount = Math.max(bands.length, 1)
-  const barWidth = width / barCount
-
-  bands.forEach((value, index) => {
-    const clamped = Math.max(0, Math.min(value, 1))
-    const magnitude = Math.pow(clamped, 0.8)
-    const barHeight = Math.max(6, magnitude * (height * 0.85))
-    const x = index * barWidth
-    const y = height - barHeight
-
-    const barGradient = ctx.createLinearGradient(0, y, 0, height)
-    barGradient.addColorStop(0, palette.accent)
-    barGradient.addColorStop(1, palette.base)
-    ctx.fillStyle = barGradient
-    ctx.fillRect(x + 6, y, barWidth - 12, barHeight)
-
-    // Glow on top of each bar to emphasize peaks.
-    ctx.fillStyle = palette.highlight
-    ctx.fillRect(x + 6, y - 4, barWidth - 12, 4)
-  })
-}
-
-function drawRings(
-  ctx: CanvasRenderingContext2D,
-  width: number,
-  height: number,
-  bands: number[],
-  palette: Palette,
-): void {
-  ctx.fillStyle = palette.background
-  ctx.fillRect(0, 0, width, height)
-
-  const cx = width / 2
-  const cy = height / 2
-  const baseRadius = Math.min(width, height) / 8
-
-  bands.forEach((value, index) => {
-    const level = Math.max(0, Math.min(value, 1))
-    const radius = baseRadius + index * (baseRadius * 0.6) + level * 90
-
-    ctx.beginPath()
-    ctx.arc(cx, cy, radius, 0, Math.PI * 2)
-    ctx.strokeStyle = palette.ring
-    ctx.lineWidth = 4 + level * 14
-    ctx.shadowBlur = 20 + level * 40
-    ctx.shadowColor = palette.highlight
-    ctx.stroke()
-  })
-
-  ctx.shadowBlur = 0
-  const pulse = bands.reduce((a, b) => a + b, 0) / Math.max(bands.length, 1)
-  const pulseRadius = baseRadius * (1.2 + pulse * 1.8)
-
-  ctx.beginPath()
-  ctx.arc(cx, cy, pulseRadius, 0, Math.PI * 2)
-  const radial = ctx.createRadialGradient(cx, cy, pulseRadius * 0.25, cx, cy, pulseRadius)
-  radial.addColorStop(0, withAlpha(palette.highlight, 0.45))
-  radial.addColorStop(1, 'rgba(0, 0, 0, 0)')
-  ctx.fillStyle = radial
-  ctx.fill()
-}
-
-function drawParticles(
-  ctx: CanvasRenderingContext2D,
-  width: number,
-  height: number,
-  bands: number[],
-  particles: Particle[],
-  palette: Palette,
-): void {
-  ctx.fillStyle = palette.background
-  ctx.fillRect(0, 0, width, height)
-
-  const avgEnergy = bands.reduce((a, b) => a + b, 0) / Math.max(bands.length, 1)
-  const bass = bands[0] ?? avgEnergy
-  const boost = 0.7 + avgEnergy * 3.2
-
-  particles.forEach((p) => {
-    p.x += p.vx * boost * 6
-    p.y += p.vy * boost * 6
-    p.life -= 0.004 + avgEnergy * 0.01
-
-    if (p.life <= 0 || p.x < -20 || p.x > width + 20 || p.y < -20 || p.y > height + 20) {
-      respawnParticle(p, width, height)
-    }
-  })
-
-  ctx.globalCompositeOperation = 'lighter'
-  particles.forEach((p) => {
-    const brightness = Math.max(0.25, Math.min(1, p.life + avgEnergy * 0.8))
-    const size = 2 + bass * 10 * p.life
-    const gradient = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, size * 3)
-    gradient.addColorStop(0, withAlpha(palette.particle, 0.9 * brightness))
-    gradient.addColorStop(1, 'rgba(0, 0, 0, 0)')
-    ctx.fillStyle = gradient
-    ctx.beginPath()
-    ctx.arc(p.x, p.y, size * 3, 0, Math.PI * 2)
-    ctx.fill()
-  })
-  ctx.globalCompositeOperation = 'source-over'
 }
 
 function drawHybrid(
@@ -205,11 +79,13 @@ function drawHybrid(
   const sub = bands[0] ?? 0
   const bass = bands[1] ?? sub
 
-  const ringBase = Math.min(width, height) / 10
+  const ringBase = Math.min(width, height) / 8.5
   const ringLevels: Array<{ level: number; hue: number }> = [
     { level: sub, hue: 210 },
     { level: bass, hue: 260 },
   ]
+
+  const innerRingMinRadius = ringBase
 
   let outerRing = 0
   ringLevels.forEach((entry, idx) => {
@@ -225,12 +101,41 @@ function drawHybrid(
   })
   ctx.shadowBlur = 0
 
+  const maxWaveformSize = (innerRingMinRadius - 12) * 2
+  const waveformWidth = Math.min(maxWaveformSize * 0.9, 500)
+  const waveformHeight = Math.min(maxWaveformSize * 0.45, 120)
+  const waveformX = cx - waveformWidth / 2
+  const barWidth = waveformWidth / bands.length
+  const barSpacing = barWidth * 0.15
+  const cornerRadius = Math.min(3, (barWidth - barSpacing) / 2)
+
+  ctx.globalCompositeOperation = 'lighter'
+  bands.forEach((value, index) => {
+    const barHeight = Math.max(4, value * waveformHeight)
+    const x = waveformX + index * barWidth + barSpacing / 2
+    const barY = cy - barHeight / 2
+    const barActualWidth = barWidth - barSpacing
+    
+    ctx.fillStyle = withAlpha(palette.accent, 0.95)
+    ctx.beginPath()
+    ctx.roundRect(x, barY, barActualWidth, barHeight, cornerRadius)
+    ctx.fill()
+    
+    if (value > 0.2) {
+      ctx.fillStyle = withAlpha(palette.highlight, value * 0.4)
+      ctx.beginPath()
+      ctx.roundRect(x, barY, barActualWidth, Math.min(barHeight, 3), [cornerRadius, cornerRadius, 0, 0])
+      ctx.fill()
+    }
+  })
+  
+  ctx.globalCompositeOperation = 'source-over'
+
   const avgEnergy = bands.reduce((a, b) => a + b, 0) / Math.max(bands.length, 1)
   const bandCount = Math.max(bands.length, 1)
   const exclusionRadius = outerRing + 10
   const maxRadius = Math.max(width, height) * 0.65
 
-  // Update particles with band-linked speed to better follow the music.
   particles.forEach((p) => {
     const bandEnergy = bands[p.band] ?? avgEnergy
     const speed = 0.35 + bandEnergy * 2.2
@@ -265,23 +170,202 @@ function drawHybrid(
   ctx.globalCompositeOperation = 'lighter'
   particles.forEach((p) => {
     const bandEnergy = bands[p.band] ?? avgEnergy
-    const size = 2 + bandEnergy * 14 * p.life
-    const alpha = 0.3 + Math.min(0.7, bandEnergy * 1.2)
+    const baseSize = 3 + bandEnergy * 22 * p.life
+    const energyBoost = Math.pow(bandEnergy, 1.5) * 10
+    const size = baseSize + energyBoost
+    const alpha = 0.3 + Math.min(0.5, bandEnergy * 0.9)
     const dx = p.x - cx
     const dy = p.y - cy
     const dist = Math.sqrt(dx * dx + dy * dy)
 
-    // Skip rendering inside the ring zone.
     if (dist < exclusionRadius) {
       return
     }
 
-    // Tail line to show velocity.
-    ctx.strokeStyle = withAlpha(palette.particle, alpha)
-    ctx.lineWidth = Math.max(1, size * 0.15)
+    const tailLength = 12 + bandEnergy * 15
+    ctx.lineCap = 'round'
+    ctx.strokeStyle = withAlpha(palette.particle, alpha * 0.7)
+    ctx.lineWidth = Math.max(1, size * 0.2)
     ctx.beginPath()
     ctx.moveTo(p.x, p.y)
-    ctx.lineTo(p.x - p.vx * 12, p.y - p.vy * 12)
+    ctx.lineTo(p.x - p.vx * tailLength, p.y - p.vy * tailLength)
+    ctx.stroke()
+
+    const glowRadius = size * 2.5
+    const gradient = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, glowRadius)
+    gradient.addColorStop(0, withAlpha(palette.particle, alpha * 0.8))
+    gradient.addColorStop(0.5, withAlpha(palette.particle, alpha * 0.4))
+    gradient.addColorStop(1, 'rgba(0, 0, 0, 0)')
+    ctx.fillStyle = gradient
+    ctx.beginPath()
+    ctx.arc(p.x, p.y, glowRadius, 0, Math.PI * 2)
+    ctx.fill()
+  })
+  ctx.globalCompositeOperation = 'source-over'
+}
+
+function drawStar(
+  ctx: CanvasRenderingContext2D,
+  width: number,
+  height: number,
+  bands: number[],
+  particles: Particle[],
+  palette: Palette,
+): void {
+  ctx.fillStyle = palette.background
+  ctx.fillRect(0, 0, width, height)
+
+  const cx = width / 2
+  const cy = height / 2
+
+  const spectrumRadius = Math.min(width, height) / 9
+  const barCount = bands.length
+  const totalBars = barCount * 2
+  const anglePerBar = (Math.PI * 2) / totalBars
+  const rotationOffset = (15 * Math.PI) / 180
+  
+  ctx.globalCompositeOperation = 'lighter'
+  
+  for (let i = 0; i < totalBars; i++) {
+    let bandIndex: number
+    if (i < barCount) {
+      bandIndex = barCount - 1 - i
+    } else {
+      bandIndex = i - barCount
+    }
+    
+    const value = bands[bandIndex] ?? 0
+    const angle = i * anglePerBar - Math.PI / 2 + rotationOffset
+    const barLength = value * 150 + 20
+    const innerRadius = spectrumRadius
+    const outerRadius = innerRadius + barLength
+    const x1 = cx + Math.cos(angle) * innerRadius
+    const y1 = cy + Math.sin(angle) * innerRadius
+    const x2 = cx + Math.cos(angle) * outerRadius
+    const y2 = cy + Math.sin(angle) * outerRadius
+    
+    const gradient = ctx.createLinearGradient(x1, y1, x2, y2)
+    gradient.addColorStop(0, withAlpha(palette.base, 0.9))
+    gradient.addColorStop(0.5, withAlpha(palette.accent, value * 0.8))
+    gradient.addColorStop(1, withAlpha(palette.highlight, value))
+    
+    ctx.strokeStyle = gradient
+    ctx.lineWidth = Math.max(4, (Math.PI * 2 * innerRadius) / totalBars * 0.9)
+    ctx.lineCap = 'round'
+    ctx.beginPath()
+    ctx.moveTo(x1, y1)
+    ctx.lineTo(x2, y2)
+    ctx.stroke()
+    
+    if (value > 0.5) {
+      ctx.beginPath()
+      ctx.arc(x2, y2, value * 8, 0, Math.PI * 2)
+      const tipGradient = ctx.createRadialGradient(x2, y2, 0, x2, y2, value * 8)
+      tipGradient.addColorStop(0, withAlpha(palette.highlight, value * 0.8))
+      tipGradient.addColorStop(1, 'rgba(0, 0, 0, 0)')
+      ctx.fillStyle = tipGradient
+      ctx.fill()
+    }
+  }
+  
+  ctx.beginPath()
+  for (let i = 0; i < totalBars; i++) {
+    let bandIndex: number
+    if (i < barCount) {
+      bandIndex = barCount - 1 - i
+    } else {
+      bandIndex = i - barCount
+    }
+    const value = bands[bandIndex] ?? 0
+    const angle = i * anglePerBar - Math.PI / 2 + rotationOffset
+    const barLength = value * 150 + 20
+    const radius = spectrumRadius + barLength
+    const x = cx + Math.cos(angle) * radius
+    const y = cy + Math.sin(angle) * radius
+    if (i === 0) {
+      ctx.moveTo(x, y)
+    } else {
+      ctx.lineTo(x, y)
+    }
+  }
+  ctx.closePath()
+  ctx.strokeStyle = withAlpha(palette.accent, 0.5)
+  ctx.lineWidth = 3
+  ctx.stroke()
+  
+  ctx.fillStyle = withAlpha(palette.base, 0.15)
+  ctx.fill()
+  
+  const avgEnergy = bands.reduce((a, b) => a + b, 0) / Math.max(bands.length, 1)
+  const centerPulse = avgEnergy
+  const centerRadius = spectrumRadius * (0.7 + centerPulse * 0.4)
+  ctx.beginPath()
+  ctx.arc(cx, cy, centerRadius, 0, Math.PI * 2)
+  const centerGradient = ctx.createRadialGradient(cx, cy, 0, cx, cy, centerRadius)
+  centerGradient.addColorStop(0, withAlpha(palette.highlight, 0.95))
+  centerGradient.addColorStop(0.5, withAlpha(palette.accent, 0.6))
+  centerGradient.addColorStop(1, withAlpha(palette.base, 0.2))
+  ctx.fillStyle = centerGradient
+  ctx.fill()
+  
+  const rotationSpeed = avgEnergy * 0.02
+  const time = Date.now() * 0.001
+  const numLines = 3
+  for (let i = 0; i < numLines; i++) {
+    const lineAngle = (i / numLines) * Math.PI * 2 + time * rotationSpeed
+    const lineLength = spectrumRadius * 0.5
+    const x1 = cx + Math.cos(lineAngle) * lineLength
+    const y1 = cy + Math.sin(lineAngle) * lineLength
+    const x2 = cx + Math.cos(lineAngle + Math.PI) * lineLength
+    const y2 = cy + Math.sin(lineAngle + Math.PI) * lineLength
+    
+    ctx.strokeStyle = withAlpha(palette.ring, 0.4)
+    ctx.lineWidth = 2
+    ctx.beginPath()
+    ctx.moveTo(x1, y1)
+    ctx.lineTo(x2, y2)
+    ctx.stroke()
+  }
+  
+  ctx.globalCompositeOperation = 'source-over'
+
+  const bandCount = Math.max(bands.length, 1)
+  const maxRadius = Math.max(width, height) * 0.7
+
+  particles.forEach((p) => {
+    const bandEnergy = bands[p.band] ?? avgEnergy
+    const speed = 0.5 + bandEnergy * 2.5
+    p.x += p.vx * speed * 5
+    p.y += p.vy * speed * 5
+    p.life -= 0.004 + bandEnergy * 0.008
+
+    const dx = p.x - cx
+    const dy = p.y - cy
+    const dist = Math.sqrt(dx * dx + dy * dy)
+
+    if (
+      p.life <= 0 ||
+      p.x < -80 ||
+      p.x > width + 80 ||
+      p.y < -80 ||
+      p.y > height + 80 ||
+      dist > maxRadius
+    ) {
+      respawnParticleRadial(p, cx, cy, bandCount)
+    }
+  })
+
+  ctx.globalCompositeOperation = 'lighter'
+  particles.forEach((p) => {
+    const bandEnergy = bands[p.band] ?? avgEnergy
+    const size = 2 + bandEnergy * 12 * p.life
+    const alpha = 0.4 + Math.min(0.6, bandEnergy * 1.0)
+
+    ctx.strokeStyle = withAlpha(palette.particle, alpha * 0.7)
+    ctx.lineWidth = Math.max(1, size * 0.2)
+    ctx.beginPath()
+    ctx.moveTo(p.x, p.y)
+    ctx.lineTo(p.x - p.vx * 15, p.y - p.vy * 15)
     ctx.stroke()
 
     const gradient = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, size * 3)
@@ -290,6 +374,207 @@ function drawHybrid(
     ctx.fillStyle = gradient
     ctx.beginPath()
     ctx.arc(p.x, p.y, size * 3, 0, Math.PI * 2)
+    ctx.fill()
+  })
+  ctx.globalCompositeOperation = 'source-over'
+}
+
+function drawOrbit(
+  ctx: CanvasRenderingContext2D,
+  width: number,
+  height: number,
+  bands: number[],
+  particles: Particle[],
+  palette: Palette,
+): void {
+  ctx.fillStyle = palette.background
+  ctx.fillRect(0, 0, width, height)
+
+  const cx = width / 2
+  const cy = height / 2
+  const spectrumRadius = Math.min(width, height) / 9
+  const barCount = bands.length
+  const totalBars = barCount * 2
+  const anglePerBar = (Math.PI * 2) / totalBars
+  
+  const time = Date.now() * 0.001
+  const spinSpeed = 0.3
+  const rotationOffset = (15 * Math.PI) / 180 + time * spinSpeed
+
+  const points: Array<{ x: number; y: number; value: number }> = []
+  for (let i = 0; i < totalBars; i++) {
+    let bandIndex: number
+    if (i < barCount) {
+      bandIndex = barCount - 1 - i
+    } else {
+      bandIndex = i - barCount
+    }
+    const value = bands[bandIndex] ?? 0
+    const angle = i * anglePerBar - Math.PI / 2 + rotationOffset
+    const barLength = value * 220 + 20
+    const radius = spectrumRadius + barLength
+    const x = cx + Math.cos(angle) * radius
+    const y = cy + Math.sin(angle) * radius
+    points.push({ x, y, value })
+  }
+
+  ctx.globalCompositeOperation = 'lighter'
+  ctx.beginPath()
+  
+  ctx.moveTo(points[0].x, points[0].y)
+  
+  for (let i = 0; i < points.length; i++) {
+    const current = points[i]
+    const next = points[(i + 1) % points.length]
+    
+    const midX = (current.x + next.x) / 2
+    const midY = (current.y + next.y) / 2
+    ctx.quadraticCurveTo(current.x, current.y, midX, midY)
+  }
+  
+  ctx.closePath()
+  
+  ctx.strokeStyle = withAlpha(palette.accent, 0.7)
+  ctx.lineWidth = 5
+  ctx.stroke()
+
+  ctx.strokeStyle = withAlpha(palette.highlight, 0.4)
+  ctx.lineWidth = 2
+  ctx.stroke()
+
+  ctx.fillStyle = withAlpha(palette.base, 0.1)
+  ctx.fill()
+
+  ctx.globalCompositeOperation = 'source-over'
+
+  const avgCircleRadius = points.reduce((sum, p) => {
+    const dx = p.x - cx
+    const dy = p.y - cy
+    return sum + Math.sqrt(dx * dx + dy * dy)
+  }, 0) / points.length
+
+  const maxWaveformSize = (spectrumRadius - 12) * 2
+  const waveformWidth = Math.min(maxWaveformSize * 1.35, 750)
+  const waveformHeight = Math.min(maxWaveformSize * 0.68, 180)
+  const waveformX = cx - waveformWidth / 2
+  const barWidth = waveformWidth / bands.length
+  const barSpacing = barWidth * 0.15
+  const cornerRadius = Math.min(3, (barWidth - barSpacing) / 2)
+
+  ctx.globalCompositeOperation = 'lighter'
+  bands.forEach((value, index) => {
+    const barHeight = Math.max(4, value * waveformHeight)
+    const x = waveformX + index * barWidth + barSpacing / 2
+    const barY = cy - barHeight / 2
+    const barActualWidth = barWidth - barSpacing
+    
+    ctx.fillStyle = withAlpha(palette.accent, 0.95)
+    ctx.beginPath()
+    ctx.roundRect(x, barY, barActualWidth, barHeight, cornerRadius)
+    ctx.fill()
+    
+    if (value > 0.2) {
+      ctx.fillStyle = withAlpha(palette.highlight, value * 0.4)
+      ctx.beginPath()
+      ctx.roundRect(x, barY, barActualWidth, Math.min(barHeight, 3), [cornerRadius, cornerRadius, 0, 0])
+      ctx.fill()
+    }
+  })
+  
+  ctx.globalCompositeOperation = 'source-over'
+
+  const avgEnergy = bands.reduce((a, b) => a + b, 0) / Math.max(bands.length, 1)
+  const exclusionRadius = avgCircleRadius + 40
+  const maxRadius = Math.max(width, height) * 0.7
+
+  particles.forEach((p) => {
+    const bandEnergy = bands[p.band] ?? avgEnergy
+    const speed = 0.5 + bandEnergy * 2.5
+    p.x += p.vx * speed * 5
+    p.y += p.vy * speed * 5
+    p.life -= 0.004 + bandEnergy * 0.008
+
+    const dx = p.x - cx
+    const dy = p.y - cy
+    const dist = Math.sqrt(dx * dx + dy * dy)
+
+    if (dist < exclusionRadius) {
+      const push = (exclusionRadius - dist) * 0.5
+      const normX = dx === 0 && dy === 0 ? 1 : dx / Math.max(dist, 0.001)
+      const normY = dx === 0 && dy === 0 ? 0 : dy / Math.max(dist, 0.001)
+      p.x += normX * push
+      p.y += normY * push
+    }
+
+    if (
+      p.life <= 0 ||
+      p.x < -80 ||
+      p.x > width + 80 ||
+      p.y < -80 ||
+      p.y > height + 80 ||
+      dist > maxRadius
+    ) {
+      const spawnAngle = Math.random() * Math.PI * 2
+      const spawnDist = exclusionRadius + 10 + Math.random() * 30
+      
+      p.x = cx + Math.cos(spawnAngle) * spawnDist
+      p.y = cy + Math.sin(spawnAngle) * spawnDist
+      
+      const speed = 0.35 + Math.random() * 0.6
+      p.vx = Math.cos(spawnAngle) * speed
+      p.vy = Math.sin(spawnAngle) * speed
+      p.life = 0.8 + Math.random() * 0.8
+      p.band = Math.floor(Math.random() * bands.length)
+    }
+  })
+
+  ctx.globalCompositeOperation = 'lighter'
+  particles.forEach((p) => {
+    const bandEnergy = bands[p.band] ?? avgEnergy
+    const dx = p.x - cx
+    const dy = p.y - cy
+    const dist = Math.sqrt(dx * dx + dy * dy)
+    const particleAngle = Math.atan2(dy, dx)
+    
+    let closestBumpEnergy = 0
+    for (let i = 0; i < totalBars; i++) {
+      let bandIndex: number
+      if (i < barCount) {
+        bandIndex = barCount - 1 - i
+      } else {
+        bandIndex = i - barCount
+      }
+      const bumpAngle = i * anglePerBar - Math.PI / 2 + rotationOffset
+      const angleDiff = Math.abs(Math.atan2(Math.sin(particleAngle - bumpAngle), Math.cos(particleAngle - bumpAngle)))
+      
+      if (angleDiff < anglePerBar) {
+        closestBumpEnergy = Math.max(closestBumpEnergy, bands[bandIndex] ?? 0)
+      }
+    }
+    
+    const energyBoost = 1 + closestBumpEnergy * 4
+    const size = (2 + bandEnergy * 12 * p.life) * energyBoost
+    const alpha = (0.3 + Math.min(0.4, bandEnergy * 0.8)) * Math.min(0.6, energyBoost * 0.4)
+
+    if (dist < exclusionRadius) {
+      return
+    }
+
+    const tailLength = 15 * Math.pow(energyBoost, 1.3)
+    ctx.lineCap = 'round'
+    ctx.strokeStyle = withAlpha(palette.particle, alpha * 0.7)
+    ctx.lineWidth = Math.max(1, size * 0.2)
+    ctx.beginPath()
+    ctx.moveTo(p.x, p.y)
+    ctx.lineTo(p.x - p.vx * tailLength, p.y - p.vy * tailLength)
+    ctx.stroke()
+
+    const gradient = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, size * 2.5)
+    gradient.addColorStop(0, withAlpha(palette.particle, alpha))
+    gradient.addColorStop(1, 'rgba(0, 0, 0, 0)')
+    ctx.fillStyle = gradient
+    ctx.beginPath()
+    ctx.arc(p.x, p.y, size * 2.5, 0, Math.PI * 2)
     ctx.fill()
   })
   ctx.globalCompositeOperation = 'source-over'
@@ -305,19 +590,45 @@ function renderFrame(
 ): void {
   const { width, height } = canvas
   switch (mode) {
-    case 'bars':
-      drawBars(ctx, width, height, bands, palette)
-      break
-    case 'rings':
-      drawRings(ctx, width, height, bands, palette)
-      break
-    case 'particles':
-      drawParticles(ctx, width, height, bands, particles, palette)
-      break
     case 'hybrid':
       drawHybrid(ctx, width, height, bands, particles, palette)
       break
+    case 'star':
+      drawStar(ctx, width, height, bands, particles, palette)
+      break
+    case 'orbit':
+      drawOrbit(ctx, width, height, bands, particles, palette)
+      break
   }
+}
+
+function PaletteButtons({
+  active,
+  onChange,
+}: {
+  active: PaletteName
+  onChange: (palette: PaletteName) => void
+}) {
+  const paletteNames = getAllPaletteNames()
+  
+  return (
+    <div className="visual-mode-toggle">
+      {paletteNames.map((paletteName) => {
+        const info = getPaletteInfo(paletteName)
+        const isActive = active === paletteName
+        return (
+          <button
+            key={paletteName}
+            type="button"
+            className={`visual-mode-button ${isActive ? 'active' : ''}`}
+            onClick={() => onChange(paletteName)}
+          >
+            {info.displayName}
+          </button>
+        )
+      })}
+    </div>
+  )
 }
 
 function VisualModeButtons({
@@ -352,16 +663,18 @@ function VjVisuals() {
   const audioAnalyzerRef = useRef<AudioAnalyzer | null>(null)
   const animationRef = useRef<number | null>(null)
   const particlesRef = useRef<Particle[]>([])
-  const visualModeRef = useRef<VisualMode>('bars')
-  const bandMetaRef = useRef<BandMeta[]>([])
-  const moodRef = useRef<MoodState | undefined>(undefined)
+  const visualModeRef = useRef<VisualMode>('hybrid')
+  const paletteNameRef = useRef<PaletteName>('metal')
 
   const presetTracks = getPresetTracks()
   const [audioMode, setAudioMode] = useState<AudioMode>('idle')
   const [status, setStatus] = useState('Initializing audio context...')
   const [hasFile, setHasFile] = useState(false)
   const [isFilePlaying, setIsFilePlaying] = useState(false)
-  const [visualMode, setVisualMode] = useState<VisualMode>('bars')
+  const [visualMode, setVisualMode] = useState<VisualMode>('hybrid')
+  const [paletteName, setPaletteName] = useState<PaletteName>('metal')
+  const [currentTrack, setCurrentTrack] = useState<string | null>(null)
+  const [isFullscreen, setIsFullscreen] = useState(false)
 
   useEffect(() => {
     const canvas = canvasRef.current
@@ -380,9 +693,6 @@ function VjVisuals() {
     audioAnalyzerRef.current = analyzer
 
     const bandConfig = analyzer.getBandsConfig()
-    bandMetaRef.current = bandConfig.map((band) => ({
-      centerHz: (band.minHz + band.maxHz) / 2,
-    }))
     const bandCount = bandConfig.length
     particlesRef.current = createParticles(220, canvas.width, canvas.height, bandCount)
     queueMicrotask(() =>
@@ -391,9 +701,7 @@ function VjVisuals() {
 
     const loop = () => {
       const frame = analyzer.getFrame()
-      const mood = updateMoodFromBands(moodRef.current, frame.bands, bandMetaRef.current)
-      moodRef.current = mood
-      const palette = paletteFromMood(mood)
+      const palette = getPalette(paletteNameRef.current)
       renderFrame(
         ctx,
         canvas,
@@ -419,6 +727,35 @@ function VjVisuals() {
     visualModeRef.current = visualMode
   }, [visualMode])
 
+  useEffect(() => {
+    paletteNameRef.current = paletteName
+  }, [paletteName])
+
+  useEffect(() => {
+    const handleFullscreenChange = () => {
+      setIsFullscreen(!!document.fullscreenElement)
+      const canvas = canvasRef.current
+      if (canvas) {
+        if (document.fullscreenElement) {
+          canvas.width = window.screen.width
+          canvas.height = window.screen.height
+          const bandCount = audioAnalyzerRef.current?.getBandsConfig().length ?? 6
+          particlesRef.current = createParticles(220, canvas.width, canvas.height, bandCount)
+        } else {
+          canvas.width = 1100
+          canvas.height = 520
+          const bandCount = audioAnalyzerRef.current?.getBandsConfig().length ?? 6
+          particlesRef.current = createParticles(220, canvas.width, canvas.height, bandCount)
+        }
+      }
+    }
+
+    document.addEventListener('fullscreenchange', handleFullscreenChange)
+    return () => {
+      document.removeEventListener('fullscreenchange', handleFullscreenChange)
+    }
+  }, [])
+
   const handleFileChange: React.ChangeEventHandler<HTMLInputElement> = async (
     event,
   ) => {
@@ -437,6 +774,7 @@ function VjVisuals() {
       setAudioMode('file')
       setHasFile(true)
       setIsFilePlaying(false)
+      setCurrentTrack(file.name)
       setStatus(`Loaded: ${file.name}. Hit Play to start the VJ view.`)
     } catch (error) {
       const message =
@@ -444,39 +782,6 @@ function VjVisuals() {
       setStatus(`File error: ${message}`)
       console.error(error)
     }
-  }
-
-  const handleFilePlay = () => {
-    const analyzer = audioAnalyzerRef.current
-    if (!analyzer) {
-      setStatus('Audio analyzer not ready.')
-      return
-    }
-    try {
-      analyzer.start()
-      setAudioMode('file')
-      setIsFilePlaying(true)
-      const name = analyzer.getCurrentFileName() ?? 'audio file'
-      setStatus(`Playing ${name}. Visuals are live.`)
-    } catch (error) {
-      const message =
-        error instanceof Error ? error.message : 'Unable to start playback.'
-      setStatus(`Play error: ${message}`)
-      console.error(error)
-    }
-  }
-
-  const handleFilePause = () => {
-    const analyzer = audioAnalyzerRef.current
-    if (!analyzer) {
-      setStatus('Audio analyzer not ready.')
-      return
-    }
-    analyzer.pauseFile()
-    setIsFilePlaying(false)
-    setAudioMode('file')
-    const name = analyzer.getCurrentFileName() ?? 'audio file'
-    setStatus(`Paused ${name}.`)
   }
 
   const handlePresetPlay = async (track: PresetTrack) => {
@@ -492,6 +797,7 @@ function VjVisuals() {
       setAudioMode('file')
       setHasFile(true)
       setIsFilePlaying(true)
+      setCurrentTrack(track.name)
       setStatus(`Playing ${track.name}. Visuals are live.`)
     } catch (error) {
       const message =
@@ -513,6 +819,7 @@ function VjVisuals() {
         await analyzer.stop()
         setAudioMode('idle')
         setStatus('Microphone stopped.')
+        setCurrentTrack(null)
         return
       }
 
@@ -521,6 +828,7 @@ function VjVisuals() {
       analyzer.start()
       setAudioMode('mic')
       setIsFilePlaying(false)
+      setCurrentTrack('Live microphone')
       setStatus('Mic live. Visuals respond to incoming audio.')
     } catch (error) {
       const message =
@@ -539,7 +847,50 @@ function VjVisuals() {
     await analyzer.stop()
     setAudioMode('idle')
     setIsFilePlaying(false)
+    setCurrentTrack(null)
     setStatus('Playback stopped. Ready for a new source.')
+  }
+
+  const handleTogglePlayPause = () => {
+    const analyzer = audioAnalyzerRef.current
+    if (!analyzer || audioMode !== 'file' || !hasFile) return
+
+    if (isFilePlaying) {
+      analyzer.pauseFile()
+      setIsFilePlaying(false)
+      const name = analyzer.getCurrentFileName() ?? currentTrack ?? 'audio file'
+      setStatus(`Paused ${name}.`)
+    } else {
+      analyzer.start()
+      setIsFilePlaying(true)
+      const name = analyzer.getCurrentFileName() ?? currentTrack ?? 'audio file'
+      setStatus(`Playing ${name}. Visuals are live.`)
+    }
+  }
+
+  const nowPlayingLabel =
+    audioMode === 'mic'
+      ? 'Live microphone feed'
+      : currentTrack ?? 'No track loaded'
+
+  const handleFullscreenToggle = async () => {
+    const canvas = canvasRef.current
+    if (!canvas) return
+
+    try {
+      if (!document.fullscreenElement) {
+        await canvas.requestFullscreen()
+        setStatus('Fullscreen mode activated. Press ESC to exit.')
+      } else {
+        await document.exitFullscreen()
+        setStatus('Exited fullscreen mode.')
+      }
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : 'Failed to toggle fullscreen.'
+      setStatus(`Fullscreen error: ${message}`)
+      console.error(error)
+    }
   }
 
   return (
@@ -551,85 +902,110 @@ function VjVisuals() {
         </p>
       </header>
 
-      <section className="controls">
-        <div className="control-group">
-          <label htmlFor="vj-file-input" className="control-label">
-            Load track (MP3/WAV)
-          </label>
-          <input
-            id="vj-file-input"
-            type="file"
-            accept="audio/*"
-            onChange={handleFileChange}
-          />
-        </div>
+      <div className="vj-content">
+        <aside className="vj-control-panel">
+          <section className="control-card">
+            <div className="control-card-title">Load track (MP3/WAV)</div>
+            <input
+              id="vj-file-input"
+              type="file"
+              accept="audio/*"
+              onChange={handleFileChange}
+            />
+          </section>
 
-        <div className="control-group">
-          <label className="control-label">Built-in tracks (drop files into src/assets/tracks)</label>
-          {presetTracks.length ? (
-            <ul className="preset-list">
-              {presetTracks.map((track) => (
-                <li key={track.id} className="preset-item">
-                  <span className="preset-name">{track.name}</span>
-                  <button type="button" onClick={() => handlePresetPlay(track)}>
-                    Play
+          <section className="control-card">
+            <div className="control-card-title">
+              Built-in tracks (drop files into src/assets/tracks)
+            </div>
+            {presetTracks.length ? (
+              <ul className="preset-list">
+                {presetTracks.map((track) => (
+                  <li key={track.id} className="preset-item">
+                    <span className="preset-name">{track.name}</span>
+                  <button
+                    type="button"
+                    onClick={() => handlePresetPlay(track)}
+                    aria-label={`Play ${track.name}`}
+                    title="Play"
+                  >
+                    ▶
                   </button>
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <p className="preset-empty">No bundled tracks found. Add files to src/assets/tracks.</p>
-          )}
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="preset-empty">No bundled tracks found. Add files to src/assets/tracks.</p>
+            )}
+          </section>
+
+          <section className="control-card">
+            <div className="control-card-title">Playback &amp; Microphone</div>
+            <div className="control-actions-row">
+              <button type="button" onClick={handleMicToggle}>
+                {audioMode === 'mic' ? 'Stop microphone' : 'Start microphone'}
+              </button>
+              <button type="button" onClick={handleStop} disabled={audioMode === 'idle'}>
+                Stop playback
+              </button>
+            </div>
+          </section>
+
+          <section className="status-section">
+            <div className="status-label">Now playing</div>
+            <div className="status-text" aria-live="polite">
+              {nowPlayingLabel}
+            </div>
+            {audioMode === 'file' && hasFile ? (
+              <div className="control-actions-row">
+                <button
+                  type="button"
+                  onClick={handleTogglePlayPause}
+                  aria-label={isFilePlaying ? 'Pause' : 'Play'}
+                  title={isFilePlaying ? 'Pause' : 'Play'}
+                >
+                  {isFilePlaying ? '⏸' : '▶'}
+                </button>
+              </div>
+            ) : null}
+            <div className="status-text" aria-live="polite">
+              {status}
+            </div>
+          </section>
+        </aside>
+
+        <div className="vj-visual-column">
+          <div className="vj-visual-toolbar">
+            <section className="visual-mode-section toolbar-section">
+              <div className="visual-mode-label">Pick a visual</div>
+              <VisualModeButtons active={visualMode} onChange={setVisualMode} />
+            </section>
+
+            <section className="visual-mode-section toolbar-section">
+              <div className="visual-mode-label">Pick a color palette</div>
+              <PaletteButtons active={paletteName} onChange={setPaletteName} />
+            </section>
+          </div>
+
+          <section className="vj-canvas-wrapper">
+            <canvas
+              ref={canvasRef}
+              width={1100}
+              height={520}
+              className="vj-canvas"
+              aria-label="Audio reactive visual canvas"
+            />
+            <button
+              type="button"
+              className="fullscreen-button"
+              onClick={handleFullscreenToggle}
+              title={isFullscreen ? 'Exit fullscreen (ESC)' : 'Enter fullscreen'}
+            >
+              {isFullscreen ? '⛶' : '⛶'}
+            </button>
+          </section>
         </div>
-
-        <div className="control-group control-group-inline">
-          <button
-            type="button"
-            onClick={handleFilePlay}
-            disabled={!hasFile || isFilePlaying}
-          >
-            Play
-          </button>
-          <button
-            type="button"
-            onClick={handleFilePause}
-            disabled={!hasFile || !isFilePlaying}
-          >
-            Pause
-          </button>
-        </div>
-
-        <div className="control-group control-group-inline">
-          <button type="button" onClick={handleMicToggle}>
-            {audioMode === 'mic' ? 'Stop microphone' : 'Start microphone'}
-          </button>
-          <button type="button" onClick={handleStop} disabled={audioMode === 'idle'}>
-            Stop playback
-          </button>
-        </div>
-      </section>
-
-      <section className="visual-mode-section">
-        <div className="visual-mode-label">Pick a visual</div>
-        <VisualModeButtons active={visualMode} onChange={setVisualMode} />
-      </section>
-
-      <section className="vj-canvas-wrapper">
-        <canvas
-          ref={canvasRef}
-          width={1100}
-          height={520}
-          className="vj-canvas"
-          aria-label="Audio reactive visual canvas"
-        />
-      </section>
-
-      <section className="status-section">
-        <div className="status-label">Status</div>
-        <div className="status-text" aria-live="polite">
-          {status}
-        </div>
-      </section>
+      </div>
     </div>
   )
 }

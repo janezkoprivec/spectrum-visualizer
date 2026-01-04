@@ -23,24 +23,24 @@ function App() {
               }
               end
             >
-              Spectrum lab
+              Live visuals
             </NavLink>
             <NavLink
-              to="/vj"
+              to="/spectrum-lab"
               className={({ isActive }) =>
                 `nav-link ${isActive ? 'nav-link-active' : ''}`
               }
             >
-              Live visuals
+              Spectrum lab
             </NavLink>
           </nav>
         </header>
 
         <main className="page-container">
           <Routes>
-            <Route path="/" element={<SpectrumLab />} />
-            <Route path="/vj" element={<VjVisuals />} />
-            <Route path="*" element={<SpectrumLab />} />
+            <Route path="/" element={<VjVisuals />} />
+            <Route path="/spectrum-lab" element={<SpectrumLab />} />
+            <Route path="*" element={<VjVisuals />} />
           </Routes>
         </main>
       </div>
